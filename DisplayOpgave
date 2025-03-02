@@ -1,0 +1,153 @@
+from machine import Pin, SPI, PWM
+import framebuf
+import utime
+
+# LCD pin konfiguration
+BL = 13  # Backlight pin
+DC = 8   # Data/Kommando pin
+RST = 12 # Reset pin
+MOSI = 11 # Master Ud Slave Ind pin for SPI
+SCK = 10  # Serielt Ur pin for SPI
+CS = 9    # Chip Vælg pin for SPI
+
+pwm = PWM(Pin(BL))  # Initialiser PWM objekt for backlight
+pwm.freq(1000)      # Sæt PWM frekvens
+pwm.duty_u16(32768) # Sæt PWM duty cycle (lysstyrke)
+
+class LCD_1inch8(framebuf.FrameBuffer):
+    def __init__(self):
+        self.width = 160  # Skærmbredde
+        self.height = 128 # Skærmhøjde
+        
+        self.cs = Pin(CS, Pin.OUT)   # Initialiser Chip Vælg pin som output
+        self.rst = Pin(RST, Pin.OUT) # Initialiser Reset pin som output
+        
+        self.cs(1)  # Sæt Chip Vælg høj (inaktiv)
+        
+        self.spi = SPI(1, 10000_000, polarity=0, phase=0, sck=Pin(SCK), mosi=Pin(MOSI), miso=None)  # Initialiser SPI objekt
+        
+        self.dc = Pin(DC, Pin.OUT)  # Initialiser Data/Kommando pin som output
+        self.dc(1)  # Sæt Data/Kommando pin høj (data tilstand)
+        
+        self.buffer = bytearray(self.height * self.width * 2)  # Opret en buffer for framebufferet (RGB565 format)
+        super().__init__(self.buffer, self.width, self.height, framebuf.RGB565)  # Initialiser FrameBuffer
+        
+        self.init_display()  # Kald funktion for at initialisere skærmen
+        
+        # Farvedefinitioner
+        self.WHITE = 0xFFFF  # Hvid
+        self.BLACK = 0x0000  # Sort
+        self.GREEN = 0x001F  # Grøn
+        self.BLUE = 0xF800   # Blå
+        self.RED = 0x07E0    # Rød
+        self.YELLOW = 0xFEE0 # Gul
+        self.ORANGE = 0xFBE0 # Orange
+
+    def write_cmd(self, cmd):
+        """Sender en kommando til LCD skærmen."""
+        self.cs(1)
+        self.dc(0)
+        self.cs(0)
+        self.spi.write(bytearray([cmd]))
+        self.cs(1)
+
+    def write_data(self, buf):
+        """Sender data til LCD skærmen."""
+        self.cs(1)
+        self.dc(1)
+        self.cs(0)
+        self.spi.write(bytearray([buf]))
+        self.cs(1)
+
+    def init_display(self):
+        """Initialiserer LCD skærmen med nødvendige kommandoer."""
+        self.rst(1)
+        self.rst(0)
+        self.rst(1)
+        
+        self.write_cmd(0x36)
+        self.write_data(0x70)
+        self.write_cmd(0x3A)
+        self.write_data(0x05)
+        
+        # ST7735R Billedhastighed
+        self.write_cmd(0xB1)
+        self.write_data(0x01)
+        self.write_data(0x2C)
+        self.write_data(0x2D)
+        self.write_cmd(0xB2)
+        self.write_data(0x01)
+        self.write_data(0x2C)
+        self.write_data(0x2D)
+        self.write_cmd(0xB3)
+        self.write_data(0x01)
+        self.write_data(0x2C)
+        self.write_data(0x2D)
+        self.write_data(0x01)
+        self.write_data(0x2C)
+        self.write_data(0x2D)
+        
+        self.write_cmd(0xB4)
+        self.write_data(0x07)
+        
+        # ST7735R Strømsekvens
+        self.write_cmd(0xC0)
+        self.write_data(0xA2)
+        self.write_data(0x02)
+        self.write_data(0x84)
+        self.write_cmd(0xC1)
+        self.write_data(0xC5)
+        self.write_cmd(0xC2)
+        self.write_data(0x0A)
+        self.write_data(0x00)
+        self.write_cmd(0xC3)
+        self.write_data(0x8A)
+        self.write_data(0x2A)
+        self.write_cmd(0xC4)
+        self.write_data(0x8A)
+        self.write_data(0xEE)
+        self.write_cmd(0xC5)
+        self.write_data(0x0E)
+        
+        # ST7735R Gamma Sekvens
+        self.write_cmd(0xe0)
+        gamma_data = [0x0f, 0x1a, 0x0f, 0x18, 0x2f, 0x28, 0x20, 0x22, 0x1f, 0x1b, 0x23, 0x37, 0x00, 0x07, 0x02, 0x10]
+        for data in gamma_data:
+            self.write_data(data)
+        
+        self.write_cmd(0xe1)
+        gamma_data = [0x0f, 0x1b, 0x0f, 0x17, 0x33, 0x2c, 0x29, 0x2e, 0x30, 0x30, 0x39, 0x3f, 0x00, 0x07, 0x03, 0x10]
+        for data in gamma_data:
+            self.write_data(data)
+        
+        self.write_cmd(0xF0)
+        self.write_data(0x01)
+        self.write_cmd(0xF6)
+        self.write_data(0x00)
+        
+        # Sleep out
+        self.write_cmd(0x11)
+        
+        # Tænd LCD skærmen
+        self.write_cmd(0x29)
+
+    def show(self):
+        """Viser framebufferet på LCD skærmen."""
+        self.write_cmd(0x2A)
+        self.write_data(0x00)
+        self.write_data(0x01)
+        self.write_data(0x00)
+        self.write_data(0xA0)
+        
+        self.write_cmd(0x2B)
+        self.write_data(0x00)
+        self.write_data(0x02)
+        self.write_data(0x00)
+        self.write_data(0x81)
+        
+        self.write_cmd(0x2C)
+        self.cs(1)
+        self.dc(1)
+        self.cs(0)
+        self.spi.write(self.buffer)
+        self.cs(1)
